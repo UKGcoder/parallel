@@ -58,7 +58,6 @@ int main() {
         double *tmp = x;
         x = cond;
         cond = tmp;
-        free(cond);
     }
     double end_time = omp_get_wtime();
     printf("time taken: %f \n", end_time - start_time);
@@ -69,5 +68,6 @@ int main() {
     free(x);
     free(b);
     free(buffer);
+    free(cond);
     return 0;
 }
