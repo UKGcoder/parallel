@@ -13,6 +13,7 @@ int main() {
     double* b = (double*)malloc(sizeof(double) * N);
     double* x = (double*)malloc(sizeof(double) * N);
     double* buffer = (double*)malloc(sizeof(double) * N);
+    double * cond = (double *) malloc(N * sizeof(double));
     for (int i = 0; i < N; ++i) {
         for (int j = 0; j < N; ++j) {
             if (i == j) {
@@ -50,7 +51,6 @@ int main() {
         if (norm/norm_b <= eps) {
             flag = 0;
         }
-        double * cond = (double *) malloc(N * sizeof(double));
         #pragma omp parallel for
         for (int i = 0; i < N; i++) {
            cond[i] = x[i] - t * buffer[i];
