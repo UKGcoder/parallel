@@ -29,14 +29,14 @@ int main(int argc, char **argv) {
     for (int i = 0; i < N; ++i) {
         for (int j = 0; j < N; ++j) {
             if (i == j) {
-                A[i * N + j] = 1;
+                A[i * N + j] = 2;
             }
             else {
-                A[i * N + j] = 2;
+                A[i * N + j] = 1;
             }
         }
         x[i] = 0;
-        b[i] = 28;
+        b[i] = N+1;
     }
     double norm_b = 0;
     for (int i = 0; i < number_of_elements; ++i) {
