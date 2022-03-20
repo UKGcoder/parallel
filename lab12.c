@@ -3,11 +3,11 @@
 #include "math.h"
 #include "mpi.h"
 
-double t = 1e-7;
+double t = 0.01;
 double eps = 1e-10;
 
 int main(int argc, char **argv) {
-    int N = 100;
+    int N = 128;
     int flag = 1;
     double start_time;
     double end_time;
@@ -15,79 +15,72 @@ int main(int argc, char **argv) {
     int process_rank;
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &process_count);
-    MPI_Comm_rank(MPI_COMM_WORLD, &process_rank);
-    double* A = NULL;
-    double* b = NULL;
-    double* x = NULL;
-    printf("I'm %d from %d processes\n", process_rank, process_count);
-    int number_of_elements = N / process_count;
-    if (process_rank == 0) {
-        A = (double*)malloc(sizeof(double) * N * N);
-        b = (double*)malloc(sizeof(double) * N);
-        x = (double*)malloc(sizeof(double) * N);
-        for (int i = 0; i < N; ++i) {
-            for (int j = 0; j < N; ++j) {
-                if (i == j) {
-                    A[i * N + j] = 1;
-                } else {
-                    A[i * N + j] = 2;
-                }
-            }
-            b[i] = 199;
-            x[i] = 0;
-        }
+    
+    if(process_count>N){
+        printf("Count of processes is more than N\n");
+        exit(0);
     }
+    MPI_Comm_rank(MPI_COMM_WORLD, &process_rank);
+    
+    double* x = (double*)malloc(sizeof(double) * N);
+    printf("I'm %d from %d processes\n", process_rank, process_count);
+    int resN= N % process_count;
+    if(resN!=0){
+        N+=process_count-resN;
+    }else{
+        resN=process_count;
+    }
+    int number_of_elements = N / process_count;
+
     double* part_A = (double*)malloc(sizeof(double) * N * number_of_elements);
     double* part_b = (double*)malloc(sizeof(double) * number_of_elements);
     double* part_x = (double*)malloc(sizeof(double) * number_of_elements);
     double* part_sum = (double*)malloc(sizeof(double) * number_of_elements);
     start_time = MPI_Wtime();
-    MPI_Scatter(A,N * number_of_elements, MPI_DOUBLE, part_A,
-                N * number_of_elements, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Scatter(b, number_of_elements, MPI_DOUBLE, part_b,
-                number_of_elements, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    MPI_Scatter(x, number_of_elements, MPI_DOUBLE, part_x,
-                number_of_elements, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    MPI_Bcast(part_A, N*number_of_elements, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(part_x, number_of_elements, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(part_b, number_of_elements, MPI_INT, 0, MPI_COMM_WORLD);
+    
+    
+    for(int i = 0; i< N;i++){
+        for(int n = 0;n<number_of_elements;n++){
+            part_A[n*N+i]=1;
+            if(i==(process_rank+n)){
+                part_A[n*N+i]=2;
+            }
+            part_sum[n]=0;
+            part_x[n]=0;
+            part_b[n]=N+1;
+        }
+    }
+    
+    
     while (flag) {
         double norm = 0;
         double norm_b = 0;
         for (int i = 0; i < number_of_elements; ++i) {
-            for (int j = 0; j < number_of_elements; ++j) {
-                part_sum[i] += part_A[i * N + j] * part_x[i];
+            double sum = 0;
+            for (int j = 0; j <N; ++j) {
+                sum += part_A[i * N + j] * part_x[i];
             }
-        }
-        MPI_Sendrecv_replace(part_x, number_of_elements, MPI_DOUBLE, (process_rank + 1) % process_count,
-                             123,(process_rank + process_count - 1) % process_count,
-                             123, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        for (int i = 0; i < number_of_elements; ++i) {
-            for (int j = number_of_elements; j < N; ++j) {
-                part_sum[i] += part_A[i * N + j] * part_x[i];
-            }
-        }
-        for (int i = 0; i < number_of_elements; ++i) {
-            part_sum[i] -= part_b[i];
+            part_sum[i]=sum-part_b[i];
             norm += part_sum[i] * part_sum[i];
-        }
-        double recv_norm;
-        MPI_Allreduce(&norm, &recv_norm, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-        recv_norm = sqrt(recv_norm);
-        for (int i = 0; i < number_of_elements; ++i) {
             norm_b += part_b[i] * part_b[i];
-        }
-        double recv_norm_b;
-        MPI_Allreduce(&norm_b, &recv_norm_b, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-        recv_norm_b = sqrt(recv_norm_b);
-        if (recv_norm/recv_norm_b <= eps) {
+        
+        norm=sqrt(norm);
+        norm_b=sqrt(norm_b);
+        if (norm/norm_b <= eps) {
             flag = 0;
+            
         }
-        for (int i = 0; i < number_of_elements; i++) {
             part_x[i] -= t * part_sum[i];
+            
         }
     }
     MPI_Gather(part_x, number_of_elements, MPI_DOUBLE, x,
                number_of_elements, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     if (process_rank == 0) {
-        for (int i = 0; i < N; ++i) {
+        for (int i = 0; i < N-process_count+resN; ++i) {
             printf("%f \n", x[i]);
         }
         end_time = MPI_Wtime();
