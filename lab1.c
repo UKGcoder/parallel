@@ -32,9 +32,8 @@ int main(int argc, char **argv) {
     
     int number_of_elements = N / process_count;
     
-         double* b = (double*)malloc(sizeof(double) * N);
-         double* x = (double*)malloc(sizeof(double) * N);
-    
+    double* b = (double*)malloc(sizeof(double) * N);
+    double* x = (double*)malloc(sizeof(double) * N);
     double* result = (double*)malloc(sizeof(double) * N);
     double* buffer = (double*)malloc(sizeof(double) * number_of_elements);
     double* part = (double*)malloc(sizeof(double) * N * number_of_elements);
@@ -42,7 +41,6 @@ int main(int argc, char **argv) {
         x[i] = 0;
         b[i] = N+1;
     }
-    MPI_Bcast(part, N*number_of_elements, MPI_INT, 0, MPI_COMM_WORLD);
     for(int i = 0; i< N;i++){
         for(int n = 0;n<number_of_elements;n++){
             part[n*N+i]=1;

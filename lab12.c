@@ -37,10 +37,6 @@ int main(int argc, char **argv) {
     double* part_x = (double*)malloc(sizeof(double) * number_of_elements);
     double* part_sum = (double*)malloc(sizeof(double) * number_of_elements);
     start_time = MPI_Wtime();
-    MPI_Bcast(part_A, N*number_of_elements, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(part_x, number_of_elements, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(part_b, number_of_elements, MPI_INT, 0, MPI_COMM_WORLD);
-    
     
     for(int i = 0; i< N;i++){
         for(int n = 0;n<number_of_elements;n++){
@@ -53,7 +49,6 @@ int main(int argc, char **argv) {
             part_b[n]=N+1;
         }
     }
-    
     
     while (flag) {
         double norm = 0;
