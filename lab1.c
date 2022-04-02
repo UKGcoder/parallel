@@ -3,11 +3,11 @@
 #include "math.h"
 #include <mpi.h>
 
-double t = 0.01;
-double eps = 1e-10;
+double t = 0.00001;
+double eps = 1e-7;
 
 int main(int argc, char **argv) {
-    int N = 128;
+    int N = 1000;
     int flag = 1;
     double start_time;
     double end_time;
@@ -72,6 +72,8 @@ int main(int argc, char **argv) {
         }
         x[i] = x[i] - t * buffer[i];
         }
+        MPI_Allgather (x, number_of_elements, MPI_DOUBLE, result,
+                    number_of_elements, MPI_DOUBLE,  MPI_COMM_WORLD);
     }
     
     MPI_Gather (x, number_of_elements, MPI_DOUBLE, result,
