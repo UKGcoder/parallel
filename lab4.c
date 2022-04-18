@@ -4,20 +4,19 @@
 
 #define X 10
 #define Y 10
-#define ITER 20
+#define ITER 8
 
 void createLife(int* startSpace, int size,int rank){
-    for(int y=0;y<size;y++){
+    for(int y=0;y<size+2;y++){
         for(int x=0;x<X;x++){
             if(rank==0){
-               if((x==1 && y==2) || (x==2 && y==3) || (x==3 && (y==1 || y==2 || y==3))){
-                   startSpace[y*X+x]=0;
-                 startSpace[y*X+x]+=1;
+               if((x==1 && y==1) || (x==2 && y==2) || (y==3 && (x==0 || x==1 || x==2))){
+                 startSpace[y*X+x]=1;
                }else{
                    startSpace[y*X+x]=0;
                }
            }else{
-            startSpace[y*X+x]=0;
+                   startSpace[y*X+x]=0;
            }
         }
     }
@@ -32,7 +31,7 @@ int arrayEquals(int* array1,int* array2,int size){
     return 1;
 }
 
-int checkLife(int* lifeSpace,int pos,int size){
+int checkLife(int* lifeSpace,int pos){
     int lifes=0;
     int x = pos%X;
     if(lifeSpace[pos-X]==1){//top
@@ -79,7 +78,7 @@ int checkLife(int* lifeSpace,int pos,int size){
     return lifes;
 }
 void createLife2(int* startSpace, int size,int rank){
-    for(int y=0;y<size;y++){
+    for(int y=0;y<size+2;y++){
         for(int x=0;x<X;x++){
             startSpace[y*X+x]=0;
         }
@@ -89,10 +88,20 @@ void createLife2(int* startSpace, int size,int rank){
 
 void updateLife(int* lifeSpace1,int* lifespace2,int size,int startPos){
     for(int i=startPos*X;i<X*size;i++){
-        if(checkLife(lifeSpace1,i,size)==3 || checkLife(lifeSpace1,i,size)==2){
-            lifespace2[i]=1;
-        }else{
-            lifespace2[i]=0;
+        if(lifeSpace1[i]==1){
+          if(checkLife(lifeSpace1,i)==3){
+             lifespace2[i]=1;
+          }else if(checkLife(lifeSpace1,i)==2){
+              lifespace2[i]=1;
+          }else{
+             lifespace2[i]=0;
+           }
+        }else if(lifeSpace1[i]==0){
+            if(checkLife(lifeSpace1,i)==3 ){
+               lifespace2[i]=1;
+            }else{
+               lifespace2[i]=0;
+             }
         }
     }
 }
@@ -122,10 +131,7 @@ int main(int argc, char **argv) {
     }
     
     int partSize = Y/process_count;
-    int partsRem = Y%process_count;
-    if(process_rank<partsRem){
-        partSize++;
-    }
+    
     
     int* vector = (int*)malloc(process_count*sizeof(int));
     int* result=(int*)malloc(process_count*sizeof(int));
@@ -142,39 +148,45 @@ int main(int argc, char **argv) {
     
     int iter = 0;
     while(iter<ITER /*|| iterStop(result,process_count)==1*/){
-        MPI_Request reqFirst,reqLast,reqNext,reqPrev,reqAll;
-        MPI_Isend(lifeSpacePart+X,X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD, &reqFirst);
-        MPI_Isend(lifeSpacePart+(X*(partSize-3)),X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD, &reqLast);
-        MPI_Irecv(lifeSpacePart,X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD,&reqPrev);
-        MPI_Irecv(lifeSpacePart+(X*(partSize-2)),X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD,&reqNext);
-        vector[process_rank]=arrayEquals(lifeSpacePart,newLifeSpacePart,partSize);
-        MPI_Ialltoall(vector,1,MPI_INT,result,1,MPI_INT,MPI_COMM_WORLD,&reqAll);
-        if(iter%2==0){
-        updateLife(lifeSpacePart,newLifeSpacePart,partSize-2,2);
+        if(process_count==1){
+            updateLife(lifeSpacePart,newLifeSpacePart,Y,0);
         }else{
-            updateLife(newLifeSpacePart,lifeSpacePart,partSize-2,2);
-        }
-        MPI_Wait(&reqFirst,MPI_STATUS_IGNORE);
-        MPI_Wait(&reqPrev,MPI_STATUS_IGNORE);
+        MPI_Request reqFirst,reqLast,reqNext,reqPrev,reqAll;
+        MPI_Isend(lifeSpacePart+X,X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD, &reqFirst);//1
+        MPI_Isend(lifeSpacePart+X*(partSize),X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD, &reqLast);//2
+        MPI_Irecv(lifeSpacePart,X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD,&reqPrev);//3
+        MPI_Irecv(lifeSpacePart+X*(partSize+1),X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD,&reqNext);//4
+        vector[process_rank]=arrayEquals(lifeSpacePart,newLifeSpacePart,partSize);//5
+        MPI_Ialltoall(vector,1,MPI_INT,result,1,MPI_INT,MPI_COMM_WORLD,&reqAll);//6
         if(iter%2==0){
-            updateLife(lifeSpacePart,newLifeSpacePart,2,1);
+        updateLife(lifeSpacePart,newLifeSpacePart,partSize,2);//7
+        }else{
+            updateLife(newLifeSpacePart,lifeSpacePart,partSize,2);
+        }
+        MPI_Wait(&reqFirst,MPI_STATUS_IGNORE);//8
+        MPI_Wait(&reqPrev,MPI_STATUS_IGNORE);//9
+        if(iter%2==0){
+            updateLife(lifeSpacePart,newLifeSpacePart,2,1);//10
         }else{
             updateLife(newLifeSpacePart,lifeSpacePart,2,1);
         }
-        MPI_Wait(&reqLast,MPI_STATUS_IGNORE);
-        MPI_Wait(&reqNext,MPI_STATUS_IGNORE);
+        MPI_Wait(&reqLast,MPI_STATUS_IGNORE);//11
+        MPI_Wait(&reqNext,MPI_STATUS_IGNORE);//12
         if(iter%2==0){
-            updateLife(lifeSpacePart,newLifeSpacePart,partSize-1,partSize-2);
+            updateLife(lifeSpacePart,newLifeSpacePart,partSize+1,partSize);//13
         }else{
-            updateLife(newLifeSpacePart,lifeSpacePart,partSize-1,partSize-2);
+            updateLife(newLifeSpacePart,lifeSpacePart,partSize+1,partSize);
         }
         
-        MPI_Wait(&reqAll,MPI_STATUS_IGNORE);
-    
+        MPI_Wait(&reqAll,MPI_STATUS_IGNORE);//14
+        }
         iter++;
+        
+    
+        
     }
     int* arrOut = (int*)malloc(X*Y*sizeof(int));
-    MPI_Gather (lifeSpacePart, X*partSize, MPI_INT, arrOut,
+    MPI_Gather (lifeSpacePart+X, X*partSize, MPI_INT, arrOut,
                 X*partSize, MPI_INT, 0, MPI_COMM_WORLD);
     if (process_rank == 0) {
         for(int y=0;y<Y;y++){
