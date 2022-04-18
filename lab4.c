@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <mpi.h>
 
-#define X 10000
-#define Y 10000
+#define X 10
+#define Y 10
 #define ITER 20
 
 void createLife(int* startSpace, int size,int rank){
@@ -11,7 +11,8 @@ void createLife(int* startSpace, int size,int rank){
         for(int x=0;x<X;x++){
             if(rank==0){
                if((x==1 && y==2) || (x==2 && y==3) || (x==3 && (y==1 || y==2 || y==3))){
-                 startSpace[y*X+x]=1;
+                   startSpace[y*X+x]=0;
+                 startSpace[y*X+x]+=1;
                }else{
                    startSpace[y*X+x]=0;
                }
@@ -129,6 +130,7 @@ int main(int argc, char **argv) {
         }
     createLife(lifeSpacePart,partSize,process_rank);
     
+    
     int iter = 0;
     while(iter<ITER /*|| iterStop(result,process_count)==1*/){
         MPI_Request reqFirst,reqLast,reqNext,reqPrev,reqAll;
@@ -159,13 +161,24 @@ int main(int argc, char **argv) {
         }
         
         MPI_Wait(&reqAll,MPI_STATUS_IGNORE);
-        
+    
         iter++;
     }
+    int* arrOut = (int*)malloc(X*Y*sizeof(int));
+    MPI_Gather (lifeSpacePart, X*partSize, MPI_INT, arrOut,
+                X*partSize, MPI_INT, 0, MPI_COMM_WORLD);
     if (process_rank == 0) {
+        for(int y=0;y<Y;y++){
+            for(int x=0;x<X;x++){
+                printf("%d",arrOut[y*X+x]);
+            }
+            printf("\n");
+       }
         end_time = MPI_Wtime();
         printf("time taken - %f sec\n", end_time - start_time);
     }
+    
+    
     
     free(result);
     free(vector);
