@@ -4,7 +4,7 @@
 
 #define X 10
 #define Y 10
-#define ITER 1
+#define ITER 20
 
 void createLife(int* startSpace, int size,int rank){
     for(int y=0;y<size;y++){
@@ -174,7 +174,7 @@ int main(int argc, char **argv) {
         iter++;
     }
     int* arrOut = (int*)malloc(X*Y*sizeof(int));
-    MPI_Gather (newLifeSpacePart, X*partSize, MPI_INT, arrOut,
+    MPI_Gather (lifeSpacePart, X*partSize, MPI_INT, arrOut,
                 X*partSize, MPI_INT, 0, MPI_COMM_WORLD);
     if (process_rank == 0) {
         for(int y=0;y<Y;y++){
@@ -188,7 +188,7 @@ int main(int argc, char **argv) {
     }
     
     
-    
+    free(arrOut);
     free(result);
     free(vector);
     free(newLifeSpacePart);
