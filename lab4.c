@@ -4,21 +4,46 @@
 
 #define X 10
 #define Y 10
-#define ITER 8
+#define ITER 4
 
 void createLife(int* startSpace, int size,int rank){
-    for(int y=0;y<size+2;y++){
-        for(int x=0;x<X;x++){
-            if(rank==0){
-               if((x==1 && y==1) || (x==2 && y==2) || (y==3 && (x==0 || x==1 || x==2))){
-                 startSpace[y*X+x]=1;
-               }else{
-                   startSpace[y*X+x]=0;
-               }
-           }else{
-                   startSpace[y*X+x]=0;
-           }
-        }
+    if(size>=3){
+        for(int y=0;y<size+2;y++){
+            for(int x=0;x<X;x++){
+                if(rank==0){
+                   if((x==1 && y==1) || (x==2 && y==2) || (y==3 && (x==0 || x==1 || x==2))){
+                     startSpace[y*X+x]=1;
+                   }else{
+                     startSpace[y*X+x]=0;
+                   }
+                }else{
+                startSpace[y*X+x]=0;
+            }
+         }
+       }
+    }else if(size==2){
+        for(int y=0;y<size+2;y++){
+            for(int x=0;x<X;x++){
+                if(rank==0){
+                   if((x==1 && y==1) || (x==2 && y==2)){
+                     startSpace[y*X+x]=1;
+                   }else{
+                     startSpace[y*X+x]=0;
+                   }
+                }else if(rank==1){
+                    if(y==1 && (x==0 || x==1 || x==2)){
+                        startSpace[y*X+x]=1;
+                    }else{
+                        startSpace[y*X+x]=0;
+                    }
+                }else{
+                startSpace[y*X+x]=0;
+              }
+         }
+       }
+    }else{
+        printf("too many processes\n");
+        exit(0);
     }
 }
 
@@ -130,9 +155,31 @@ int main(int argc, char **argv) {
         exit(0);
     }
     
+    int* revCounts = (int*)malloc(process_count*sizeof(int));
+    int* displs = (int*)malloc(process_count*sizeof(int));
     int partSize = Y/process_count;
+    int remSize = Y%process_count;
+    int sum=0;
+    if(process_rank==0){
+        for(int i=0;i<process_count;i++){
+            displs[i]=sum;
+            if(i<remSize){
+                revCounts[i]=X*partSize+X;
+            }else{
+                revCounts[i]=partSize*X;
+            }
+            printf("%d ",revCounts[i]);
+            printf("%d ",displs[i]);
+            sum+=revCounts[i];
+        }
+        printf("\n");
+    }
     
-    
+    for(int i=0;i<remSize;i++){
+        if(process_rank==remSize){
+            partSize++;
+        }
+    }
     int* vector = (int*)malloc(process_count*sizeof(int));
     int* result=(int*)malloc(process_count*sizeof(int));
     
@@ -145,11 +192,32 @@ int main(int argc, char **argv) {
     createLife(lifeSpacePart,partSize,process_rank);
     createLife2(newLifeSpacePart,partSize,process_rank);
     
+    int* arrOut = (int*)malloc(X*Y*sizeof(int));
+    
+    MPI_Gatherv (lifeSpacePart+X, partSize*X, MPI_INT, arrOut,
+                revCounts,displs, MPI_INT, 0, MPI_COMM_WORLD);
+    
+    if (process_rank == 0) {
+        for(int y=0;y<Y;y++){
+            for(int x=0;x<X;x++){
+                printf("%d",arrOut[y*X+x]);
+            }
+            printf("\n");
+       }
+        printf("\n");
+        printf("=====\n");
+        printf("\n");
+    }
+    
     
     int iter = 0;
     while(iter<ITER /*|| iterStop(result,process_count)==1*/){
         if(process_count==1){
+            if(iter%2==0){
             updateLife(lifeSpacePart,newLifeSpacePart,Y,0);
+            }else{
+            updateLife(newLifeSpacePart,lifeSpacePart,Y,0);
+            }
         }else{
         MPI_Request reqFirst,reqLast,reqNext,reqPrev,reqAll;
         MPI_Isend(lifeSpacePart+X,X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD, &reqFirst);//1
@@ -181,25 +249,20 @@ int main(int argc, char **argv) {
         MPI_Wait(&reqAll,MPI_STATUS_IGNORE);//14
         }
         iter++;
-        
-    
-        
     }
-    int* arrOut = (int*)malloc(X*Y*sizeof(int));
-    MPI_Gather (lifeSpacePart+X, X*partSize, MPI_INT, arrOut,
-                X*partSize, MPI_INT, 0, MPI_COMM_WORLD);
-    if (process_rank == 0) {
+    
+    MPI_Gatherv(lifeSpacePart+X, partSize*X, MPI_INT, arrOut,
+                revCounts,displs, MPI_INT, 0, MPI_COMM_WORLD);
+
         for(int y=0;y<Y;y++){
             for(int x=0;x<X;x++){
                 printf("%d",arrOut[y*X+x]);
             }
             printf("\n");
-       }
-        end_time = MPI_Wtime();
-        printf("time taken - %f sec\n", end_time - start_time);
-    }
+        }
+         
     
-    
+    free(revCounts);
     free(arrOut);
     free(result);
     free(vector);
