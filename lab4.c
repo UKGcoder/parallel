@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <mpi.h>
 
-#define X 12
-#define Y 12
+#define X 16
+#define Y 16
 #define ITER 4
 
 void createLife(int* startSpace, int size,int rank){
@@ -168,11 +168,19 @@ void argsForGatherv(int* revCounts,int* displs,int partSize,int process_count,in
 
 void algorithm(int* lifeSpacePart,int* newLifeSpacePart,int*vector,int* result,int process_count,int process_rank,int partSize,int iter){
     MPI_Request reqFirst,reqLast,reqNext,reqPrev,reqAll;
-    MPI_Isend(lifeSpacePart+X,X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD, &reqFirst);//1
-    MPI_Isend(lifeSpacePart+X*(partSize),X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD, &reqLast);//2
-    MPI_Irecv(lifeSpacePart,X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD,&reqPrev);//3
-    MPI_Irecv(lifeSpacePart+X*(partSize+1),X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD,&reqNext);//4
+    if(iter%2==0){
+        MPI_Isend(lifeSpacePart+X,X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD, &reqFirst);//отправка первой строки пред процессу
+        MPI_Isend(lifeSpacePart+X*(partSize),X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD, &reqLast);//отправка последнего
+        MPI_Irecv(lifeSpacePart,X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD,&reqPrev);//прием последней строки прошлого процесса
+        MPI_Irecv(lifeSpacePart+X*(partSize+1),X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD,&reqNext);//прием  первой строки следующего
+        vector[process_rank]=arrayEquals(lifeSpacePart,newLifeSpacePart,partSize);//5
+    }else{
+        MPI_Isend(newLifeSpacePart+X,X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD, &reqFirst);//отправка первой строки пред процессу
+        MPI_Isend(newLifeSpacePart+X*(partSize),X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD, &reqLast);//отправка последнего
+        MPI_Irecv(newLifeSpacePart,X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD,&reqPrev);//прием последней строки прошлого процесса
+        MPI_Irecv(newLifeSpacePart+X*(partSize+1),X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD,&reqNext);//прием  первой строки следующего
     vector[process_rank]=arrayEquals(lifeSpacePart,newLifeSpacePart,partSize);//5
+    }
     MPI_Ialltoall(vector,1,MPI_INT,result,1,MPI_INT,MPI_COMM_WORLD,&reqAll);//6
     if(partSize>2){
         if(iter%2==0){
@@ -261,7 +269,10 @@ int main(int argc, char **argv) {
     }
 
     if(process_rank==0){
+        end_time=MPI_Wtime();
         printArray(arrOut);
+        printf("\n");
+        printf("time taken - %f sec\n", end_time - start_time);
     }
     free(revCounts);
     free(arrOut);
