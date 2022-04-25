@@ -2,9 +2,9 @@
 #include <stdlib.h>
 #include <mpi.h>
 
-#define X 16
-#define Y 16
-#define ITER 4
+#define X 1000
+#define Y 1000
+#define ITER 2000
 
 void createLife(int* startSpace, int size,int rank){
     if(size>=3){
@@ -168,41 +168,23 @@ void argsForGatherv(int* revCounts,int* displs,int partSize,int process_count,in
 
 void algorithm(int* lifeSpacePart,int* newLifeSpacePart,int*vector,int* result,int process_count,int process_rank,int partSize,int iter){
     MPI_Request reqFirst,reqLast,reqNext,reqPrev,reqAll;
-    if(iter%2==0){
         MPI_Isend(lifeSpacePart+X,X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD, &reqFirst);//отправка первой строки пред процессу
         MPI_Isend(lifeSpacePart+X*(partSize),X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD, &reqLast);//отправка последнего
         MPI_Irecv(lifeSpacePart,X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD,&reqPrev);//прием последней строки прошлого процесса
         MPI_Irecv(lifeSpacePart+X*(partSize+1),X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD,&reqNext);//прием  первой строки следующего
         vector[process_rank]=arrayEquals(lifeSpacePart,newLifeSpacePart,partSize);//5
-    }else{
-        MPI_Isend(newLifeSpacePart+X,X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD, &reqFirst);//отправка первой строки пред процессу
-        MPI_Isend(newLifeSpacePart+X*(partSize),X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD, &reqLast);//отправка последнего
-        MPI_Irecv(newLifeSpacePart,X,MPI_INT,(process_rank+process_count-1)%process_count,123,MPI_COMM_WORLD,&reqPrev);//прием последней строки прошлого процесса
-        MPI_Irecv(newLifeSpacePart+X*(partSize+1),X,MPI_INT,(process_rank+1)%process_count,123,MPI_COMM_WORLD,&reqNext);//прием  первой строки следующего
-    vector[process_rank]=arrayEquals(lifeSpacePart,newLifeSpacePart,partSize);//5
-    }
     MPI_Ialltoall(vector,1,MPI_INT,result,1,MPI_INT,MPI_COMM_WORLD,&reqAll);//6
     if(partSize>2){
-        if(iter%2==0){
             updateLife(lifeSpacePart,newLifeSpacePart,partSize,2);//7
-        }else{
-            updateLife(newLifeSpacePart,lifeSpacePart,partSize,2);
-        }
+    
     }
     MPI_Wait(&reqFirst,MPI_STATUS_IGNORE);//8
     MPI_Wait(&reqPrev,MPI_STATUS_IGNORE);//9
-    if(iter%2==0){
-        updateLife(lifeSpacePart,newLifeSpacePart,2,1);//10
-    }else{
-        updateLife(newLifeSpacePart,lifeSpacePart,2,1);
-    }
+    updateLife(lifeSpacePart,newLifeSpacePart,2,1);//10
+    
     MPI_Wait(&reqLast,MPI_STATUS_IGNORE);//11
     MPI_Wait(&reqNext,MPI_STATUS_IGNORE);//12
-    if(iter%2==0){
-        updateLife(lifeSpacePart,newLifeSpacePart,partSize+1,partSize);//13
-    }else{
-        updateLife(newLifeSpacePart,lifeSpacePart,partSize+1,partSize);
-    }
+    updateLife(lifeSpacePart,newLifeSpacePart,partSize+1,partSize);//13
     MPI_Wait(&reqAll,MPI_STATUS_IGNORE);//14
 }
 
@@ -232,20 +214,18 @@ int main(int argc, char **argv) {
     int* result=(int*)malloc(process_count*sizeof(int));
     int* lifeSpacePart = (int*)malloc(X*(partSize+2)*sizeof(int));
     int* newLifeSpacePart = (int*)malloc(X*(partSize+2)*sizeof(int));
-    if (process_rank == 0) {
-            start_time = MPI_Wtime();
-        }
     createLife(lifeSpacePart,partSize,process_rank);
     createLife2(newLifeSpacePart,partSize,process_rank);
-    
-    int* arrOut = (int*)malloc(X*Y*sizeof(int));
-    
+    int* arrOut;
     MPI_Gatherv (lifeSpacePart+X, partSize*X, MPI_INT, arrOut,
-                revCounts,displs, MPI_INT, 0, MPI_COMM_WORLD);
+                    revCounts,displs, MPI_INT, 0, MPI_COMM_WORLD);
     if (process_rank == 0) {
-        printArray(arrOut);
+        arrOut = (int*)malloc(X*Y*sizeof(int));
+            start_time = MPI_Wtime();
+        //printArray(arrOut);
         printf("==========\n");
         printf("\n");
+    
     }
     int iter = 0;
     while(iter<ITER /*|| iterStop(result,process_count)==1*/){
@@ -256,26 +236,31 @@ int main(int argc, char **argv) {
             updateLife(newLifeSpacePart,lifeSpacePart,Y,0);
             }
         }else{
-           algorithm(lifeSpacePart,newLifeSpacePart,vector,result,process_count,process_rank,partSize,iter);
+            if(iter%2==0){
+                algorithm(lifeSpacePart,newLifeSpacePart,vector,result,process_count,process_rank,partSize,iter);
+            }else{
+                algorithm(newLifeSpacePart,lifeSpacePart,vector,result,process_count,process_rank,partSize,iter);
+            }
+           
         }
         iter++;
     }
     if(ITER%2==0){
+
         MPI_Gatherv(lifeSpacePart+X, partSize*X, MPI_INT, arrOut,
                     revCounts,displs, MPI_INT, 0, MPI_COMM_WORLD);
     }else{
         MPI_Gatherv(newLifeSpacePart+X, partSize*X, MPI_INT, arrOut,
                     revCounts,displs, MPI_INT, 0, MPI_COMM_WORLD);
     }
-
     if(process_rank==0){
         end_time=MPI_Wtime();
-        printArray(arrOut);
+        //printArray(arrOut);
         printf("\n");
         printf("time taken - %f sec\n", end_time - start_time);
     }
-    free(revCounts);
     free(arrOut);
+    free(revCounts);
     free(result);
     free(vector);
     free(newLifeSpacePart);
