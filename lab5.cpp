@@ -1,220 +1,129 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <math.h>
 #include <mpi.h>
 #include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
-#include <math.h>
-#include <unistd.h>
-#include <cstddef>
 
-#define REQUEST_TAG 10
-#define ANSWER_TAG 20
-#define SUCCESS 500
-#define FAIL 404
-#define NEED_TASKS 220
-#define TURN_OFF 312
-#define TASKS_IN_LIST 200
-#define L 10000
+#define PROC_TASKS 100
+#define LISTS 4
+#define L 50000
 
-typedef struct Task {
-    int repeatNum;
-} Task;
+int current_task = 0;
+int remaining_tasks = PROC_TASKS;
+int *tasks;
+pthread_mutex_t p_mutex;
+pthread_t recReceiver;
+pthread_attr_t pthread_attr;
+double result;
+int tasks_number;
 
-typedef Task TaskList[TASKS_IN_LIST];
-
-int rank, size;
-int iterCounter = 0, iterMax = 5;
-int curTask = 0, listSize = 0;
-double globalRes = 0;
-TaskList taskList;
-pthread_mutex_t list_mutex;
-MPI_Datatype MPI_TASK;
-
-void getTaskList(int iter) {
-    listSize = TASKS_IN_LIST;
-    for (int i = rank * TASKS_IN_LIST; i < (rank + 1) * TASKS_IN_LIST; i++) {
-        taskList[i % TASKS_IN_LIST].repeatNum = abs(TASKS_IN_LIST / 2 - i % TASKS_IN_LIST) * abs(rank - (iterCounter % size)) * L;
+void *receive(void *) {
+  MPI_Status status;
+  int buffer;
+  int prepared_tasks = 0;
+  while (1) {
+    MPI_Recv(&buffer, 1, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
+    if (buffer == -1) break;
+    pthread_mutex_lock(&p_mutex);
+    if (remaining_tasks > (PROC_TASKS / 20)) {
+      prepared_tasks = remaining_tasks / 2;
+      MPI_Send(&prepared_tasks, 1, MPI_INT, status.MPI_SOURCE, 1, MPI_COMM_WORLD);
+      MPI_Send(&tasks[current_task + 1], prepared_tasks, MPI_INT, status.MPI_SOURCE, 1, MPI_COMM_WORLD);
+      current_task += prepared_tasks;
+      remaining_tasks -= prepared_tasks;
+    } else {
+      prepared_tasks = 0;
+      MPI_Send(&prepared_tasks, 1, MPI_INT, status.MPI_SOURCE, 1, MPI_COMM_WORLD);
     }
+    pthread_mutex_unlock(&p_mutex);
+  }
+  pthread_exit(0);
 }
 
-int getTaskFrom(int from) {
-    int flag = NEED_TASKS;
-    MPI_Send(&flag, 1, MPI_INT, from, REQUEST_TAG, MPI_COMM_WORLD);
-    MPI_Recv(&flag, 1, MPI_INT, from, ANSWER_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    if (flag == FAIL) return FAIL;
-
-    Task recvTask;
-    MPI_Recv(&recvTask, 1, MPI_TASK, from, ANSWER_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-    pthread_mutex_lock(&list_mutex);
-    taskList[listSize] = recvTask;
-    listSize++;
-    pthread_mutex_unlock(&list_mutex);
-    return SUCCESS;
+void pthreadInitialize() {
+  pthread_attr_init(&pthread_attr);
+  pthread_attr_setdetachstate(&pthread_attr, PTHREAD_CREATE_JOINABLE);
+  pthread_create(&recReceiver, &pthread_attr, receive, NULL);
+  pthread_attr_destroy(&pthread_attr);
+  pthread_mutex_init(&p_mutex, NULL);
 }
 
-void doTask(Task task) {
-    for (int i = 0; i < task.repeatNum; i++) {
-        globalRes += sin(i);
+void calc() {
+  int itTask;
+  while (remaining_tasks != 0) {
+    itTask = current_task;
+    remaining_tasks--;
+    pthread_mutex_unlock(&p_mutex);
+    for (int j = 0; j < tasks[itTask]; j++) {
+      result += sin(j);
     }
-}
-
-void *taskSenderThread(void *args) {
-    int flag;
-    while (iterCounter < iterMax) {
-        MPI_Status status;
-        MPI_Recv(&flag, 1, MPI_INT, MPI_ANY_SOURCE, REQUEST_TAG, MPI_COMM_WORLD, &status);
-        if (flag == TURN_OFF) break;
-
-        pthread_mutex_lock(&list_mutex);
-        if (curTask >= listSize - 1) {
-            pthread_mutex_unlock(&list_mutex);
-
-            flag = FAIL;
-            MPI_Send(&flag, 1, MPI_INT, status.MPI_SOURCE, ANSWER_TAG, MPI_COMM_WORLD);
-            continue;
-        }
-
-        listSize--;
-        Task sendTask = taskList[listSize];
-        pthread_mutex_unlock(&list_mutex);
-
-        flag = SUCCESS;
-        MPI_Send(&flag, 1, MPI_INT, status.MPI_SOURCE, ANSWER_TAG, MPI_COMM_WORLD);
-        MPI_Send(&sendTask, 1, MPI_TASK, status.MPI_SOURCE, ANSWER_TAG, MPI_COMM_WORLD);
-    }
-    return NULL;
-}
-
-void *taskEvaluatorThread(void *args) {
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    struct timespec start, end;
-    iterCounter = 0;
-    while (iterCounter < iterMax) {
-        int tasksDone = 0;
-        int hasTasks = 1;
-
-        pthread_mutex_lock(&list_mutex);
-        curTask = 0;
-        getTaskList(iterCounter);
-        pthread_mutex_unlock(&list_mutex);
-
-        clock_gettime(CLOCK_MONOTONIC, &start);
-        while (hasTasks) {
-            pthread_mutex_lock(&list_mutex);
-            if (curTask < listSize) {
-                Task task = taskList[curTask];
-                pthread_mutex_unlock(&list_mutex);
-                doTask(task);
-                tasksDone++;
-                pthread_mutex_lock(&list_mutex);
-                curTask++;
-                pthread_mutex_unlock(&list_mutex);
-                continue;
-            }
-
-            curTask = 0;
-            listSize = 0;
-            pthread_mutex_unlock(&list_mutex);
-            hasTasks = 0;
-            for (int i = 0; i < size; i++) {
-                if (i == rank) continue;
-                if (getTaskFrom(i) == SUCCESS) {
-                    hasTasks = 1;
-                }
-            }
-        }
-        clock_gettime(CLOCK_MONOTONIC, &end);
-
-        double timeTaken = end.tv_sec - start.tv_sec + 0.000000001 * (end.tv_nsec - start.tv_nsec);
-        printf("Iteration %d, Process %d - tasks done = %d\n", iterCounter, rank, tasksDone);
-        printf("Iteration %d, Process %d - globalRes = %lf\n", iterCounter, rank, globalRes);
-        printf("Iteration %d, Process %d - time taken = %lf sec.\n", iterCounter, rank, timeTaken);
-        fflush(stdout);
-
-        double minTime, maxTime;
-        MPI_Reduce(&timeTaken, &minTime, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
-        MPI_Reduce(&timeTaken, &maxTime, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-
-        if (rank == 0) {
-            printf("Iteration %d, Imbalance time = %lf sec., %lf\n", iterCounter, maxTime - minTime, (maxTime - minTime) / maxTime * 100);
-            fflush(stdout);
-        }
-
-        MPI_Barrier(MPI_COMM_WORLD);
-        iterCounter++;
-    }
-
-    int flag = TURN_OFF;
-    MPI_Send(&flag, 1, MPI_INT, rank, REQUEST_TAG, MPI_COMM_WORLD);
-
-    return NULL;
-}
-
-void createTaskType() {
-    const int num = 1;
-    int lenOfBlocks[num] = { 1 };
-    MPI_Datatype types[num] = { MPI_INT };
-    MPI_Aint offsets[num];
-
-    offsets[0] = offsetof(Task, repeatNum); //смещение "задания" от начала стуктуры
-    /*создаём новый тип данных
-     * num - количество блоков
-     * lenOfBlocks - количество элементов в каждом блоке
-     * offsets - смещение блока
-     * types - тип элементов в каждом блоке
-     * MPI_TASK - новый тип данных (так таковые "задания")
-     */
-    MPI_Type_create_struct(num, lenOfBlocks, offsets, types, &MPI_TASK);
-    MPI_Type_commit(&MPI_TASK); //регистрируем новый производный тип
+    tasks_number++;
+    pthread_mutex_lock(&p_mutex);
+    current_task++;
+  }
 }
 
 int main(int argc, char **argv) {
-    int provided;
-    //Инициализация среды выполнения MPI, где несколько
-    //потоков могут вызвать MPI без каких либо ограничений.
-    //provided - Уровень предоставляемой поддержки потоков
-    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
-    if (provided != MPI_THREAD_MULTIPLE) {
-        fprintf(stderr, "Couldn't init MPI with MPI_THREAD_MULTIPLE level support\n");
-        MPI_Finalize();
-        return 0;
-    }
+  MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, NULL);
+  int size;
+  int rank;
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank); //номер процесса
-    MPI_Comm_size(MPI_COMM_WORLD, &size); //число процессов
-    createTaskType();
+  pthreadInitialize();
 
-    pthread_t threads[2];
-    pthread_mutex_init(&list_mutex, NULL); //инициализация мьютекса
-    pthread_attr_t attrs; //перечень атрибутов потока
-    if (pthread_attr_init(&attrs) != 0) { //инициализруем объект атрибутов значениями
-        perror("Cannot initialize attributes");
-        abort();
+  tasks = (int*)calloc(PROC_TASKS, sizeof(int));
+  result = 0;
+  tasks_number = 0;
+
+  for (int i = 0; i < LISTS; i++) {
+    double start = MPI_Wtime();
+    for (int j = 0; j < PROC_TASKS; j++) {
+      tasks[j] = abs(50 - j % 100) * abs(rank - (i % size)) * L;
     }
-    //pthread_attr_setdetachstate - установить атрибут состояния отсоединения в объекте атрибутов потока.
-    if (pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_JOINABLE) != 0) {
-        perror("Error in setting attributes");
-        abort();
-    }
-    //создаём 2 потока: 1) отправляет задания; 2) делает задания.
-    if (pthread_create(&threads[0], &attrs, taskSenderThread, NULL) != 0 ||
-        pthread_create(&threads[1], &attrs, taskEvaluatorThread, NULL) != 0) {
-        perror("Cannot create a thread");
-        abort();
-    };
-    pthread_attr_destroy(&attrs); //уничтожаем объект атрибутов
-    for (int i = 0; i < 2; i++) {
-        if (pthread_join(threads[i], NULL) != 0) { //соединение с завершённым потоком
-            perror("Cannot join a thread");
-            abort();
+    pthread_mutex_lock(&p_mutex);
+    calc();
+    pthread_mutex_unlock(&p_mutex);
+    int extra_tasks_flag = 0;
+    while (extra_tasks_flag == 0) {
+      extra_tasks_flag = 1;
+      int itRank = (rank + 1) % size;
+      int addTasks;
+      while (itRank != rank) {
+        MPI_Send(&rank, 1, MPI_INT, itRank, 0, MPI_COMM_WORLD);
+        MPI_Recv(&addTasks, 1, MPI_INT, itRank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        if (addTasks != 0) {
+          MPI_Recv(tasks, addTasks, MPI_INT, itRank, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+          pthread_mutex_lock(&p_mutex);
+          current_task = 0;
+          remaining_tasks = addTasks;
+          calc();
+          pthread_mutex_unlock(&p_mutex);
+          extra_tasks_flag = 0;
         }
+        itRank++;
+        itRank %= size;
+      }
     }
-
-    pthread_mutex_destroy(&list_mutex);
-    MPI_Type_free(&MPI_TASK);
-    MPI_Finalize();
-    return 0;
+    double end = MPI_Wtime();
+    double time = end - start;
+    double minTime;
+    double maxTime;
+    MPI_Allreduce(&time, &minTime, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+    MPI_Allreduce(&time, &maxTime, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+    double delta = maxTime - minTime;
+    double disbalance = (delta / maxTime) * 100;
+    printf("[tasks_list %d]\n", i);
+    printf("[rank %d]\n tasks_number = %d\n result = %f\n time: %f\n", rank, tasks_number, result, time);
+    printf("delta: %f, disbalance: %f\n", delta, disbalance);
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+  int receiver_end = -1;
+  MPI_Send(&receiver_end, 1, MPI_INT, (rank + 1) % size, 0, MPI_COMM_WORLD);
+  pthread_join(recReceiver, NULL);
+  pthread_mutex_destroy(&p_mutex);
+  MPI_Finalize();
+  return 0;
 }
+
 
